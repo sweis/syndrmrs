@@ -1,0 +1,36 @@
+[package]
+name = "syndrmrs"
+version = "0.0.0"
+edition = "2024"
+readme = "README.md"
+description = """
+⚠️ EXPERIMENTAL - DO NOT USE IN PRODUCTION ⚠️
+Educational Rust implementation of Hamming Quasi-Cyclic (HQC) KEM (draft 22/08/2025).
+"""
+license = "Apache-2.0"
+rust-version = "1.91"
+repository = "https://github.com/initsecret/syndrmrs"
+categories = ["cryptography", "no-std"]
+keywords = ["crypto", "hqc", "post-quantum", "experimental", "educational"]
+
+# adapted from https://github.com/RustCrypto/KEMs/blob/525c6307021b215f9a3dc4a6f0f63d9dd07a7374/ml-kem/Cargo.toml
+[dependencies]
+kem = "0.4.0-rc.2"
+rand_core = "0.10.0-rc-3"
+sha3 = { version = "0.11.0-rc.3", default-features = false }
+subtle = { version = "2", default-features = false }
+hybrid-array = { git = "https://github.com/initsecret/hybrid-array", branch = "add-hqc-sizes", features = ["extra-sizes", "subtle"] }
+
+[dev-dependencies]
+aws-lc-rs = "1"
+criterion = "0.5"
+hex = "0.4"
+rand_chacha = "0.9.0"
+
+[[bench]]
+name = "kem"
+harness = false
+
+# Patch all hybrid-array dependencies to use the version with hqc sizes
+[patch.crates-io]
+hybrid-array = { git = "https://github.com/initsecret/hybrid-array", branch = "add-hqc-sizes" }
