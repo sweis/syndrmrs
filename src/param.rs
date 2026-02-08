@@ -11,7 +11,7 @@ use hybrid_array::{
 ///
 /// This trait defines all the compile-time parameters for an HQC variant.
 /// Implementations exist for HQC-1, HQC-3, and HQC-5.
-pub trait ParameterSet: Default + Clone + Debug + PartialEq
+pub trait ParameterSet: Default + Clone + Debug + PartialEq + Eq
 where
     Self::RSDelta: Add<U1> + Add<Self::RSDelta>,
     <Self::RSDelta as Add<U1>>::Output: ArraySize,

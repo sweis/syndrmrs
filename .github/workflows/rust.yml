@@ -10,17 +10,37 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  fmt:
     if: github.repository_owner == 'initsecret'
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - name: Format
       run: cargo fmt -- --check
+
+  clippy:
+    if: github.repository_owner == 'initsecret'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
     - name: Clippy
       run: cargo clippy -- -D warnings
+
+  audit:
+    if: github.repository_owner == 'initsecret'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+    - name: Audit
+      run: cargo audit
+
+  test:
+    if: github.repository_owner == 'initsecret'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
     - name: Run tests

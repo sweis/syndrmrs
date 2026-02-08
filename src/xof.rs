@@ -19,6 +19,7 @@ pub struct Xof {
 }
 
 impl Xof {
+    #[must_use]
     pub fn init(seed: &[u8], domain_sep: u8) -> Self {
         let mut hasher = Shake256::default();
         sha3::digest::Update::update(&mut hasher, seed);
@@ -88,6 +89,7 @@ impl Xof {
     }
 }
 
+#[must_use]
 pub fn hash_g(hash_ek: &[u8], m: &[u8], salt: &[u8]) -> (Array<u8, U32>, Array<u8, U32>) {
     let mut hasher = Sha3_512::new();
     hasher.update(hash_ek);
@@ -103,6 +105,7 @@ pub fn hash_g(hash_ek: &[u8], m: &[u8], salt: &[u8]) -> (Array<u8, U32>, Array<u
     (a, b)
 }
 
+#[must_use]
 pub fn hash_h(ek: &[u8]) -> Array<u8, U32> {
     let mut hasher = Sha3_256::new();
     hasher.update(ek);
@@ -113,6 +116,7 @@ pub fn hash_h(ek: &[u8]) -> Array<u8, U32> {
     a
 }
 
+#[must_use]
 pub fn hash_i(seed: &[u8]) -> (Array<u8, U32>, Array<u8, U32>) {
     let mut hasher = Sha3_512::new();
     hasher.update(seed);
@@ -126,6 +130,7 @@ pub fn hash_i(seed: &[u8]) -> (Array<u8, U32>, Array<u8, U32>) {
     (a, b)
 }
 
+#[must_use]
 pub fn hash_j(hash_ek: &[u8], sigma: &[u8], c_kem: &[u8]) -> Array<u8, U32> {
     let mut hasher = Sha3_256::new();
     hasher.update(hash_ek);

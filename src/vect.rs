@@ -350,13 +350,30 @@ fn support_to_vect_from_slice<P: ParameterSet>(support: &[u32]) -> Vect<P> {
 /// In GF(2), addition is the same as XOR. This operation is used throughout
 /// the HQC scheme for combining vectors.
 ///
-/// https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3
+/// XORs at u64 width for throughput, then handles any trailing bytes.
+///
+/// <https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3>
 #[inline]
 pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     let mut result = Vect::<P>::default();
-    for i in 0..a.len() {
-        result[i] = a[i] ^ b[i];
+    let n = a.len();
+    let chunks = n / 8;
+    let remainder = n % 8;
+
+    // XOR 8 bytes at a time via u64
+    for i in 0..chunks {
+        let off = i * 8;
+        let wa = u64::from_le_bytes(a[off..off + 8].try_into().unwrap());
+        let wb = u64::from_le_bytes(b[off..off + 8].try_into().unwrap());
+        result[off..off + 8].copy_from_slice(&(wa ^ wb).to_le_bytes());
     }
+
+    // Handle trailing bytes
+    let tail = chunks * 8;
+    for i in 0..remainder {
+        result[tail + i] = a[tail + i] ^ b[tail + i];
+    }
+
     result
 }
 
@@ -430,8 +447,8 @@ pub(crate) fn vect_mul<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     // That is X^{HQC_N} = 1, X^{HQC_N+1} = X,...
     let mut out_words = VectNWords::<P>::default();
     for i in 0..n_words {
-        let r = mul_res[i + n_words - 1] >> (n & 0b111111);
-        let carry = mul_res[i + n_words] << (64 - (n & 0b111111));
+        let r = mul_res[i + n_words - 1] >> (n & 0b11_1111);
+        let carry = mul_res[i + n_words] << (64 - (n & 0b11_1111));
         out_words[i] = mul_res[i] ^ r ^ carry;
     }
 
