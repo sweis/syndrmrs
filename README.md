@@ -46,25 +46,25 @@ On my MacBook Pro with Apple M2 Pro, I thought it would be humbling to benchmark
 **KeyGen**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 4.0 ms | 8.5 µs | 470x |
-| 192-bit | 16.1 ms | 12.8 µs | 1260x |
-| 256-bit | 41.4 ms | 16.8 µs | 2460x |
+| 128-bit | 214 µs | 8.5 µs | 25x |
+| 192-bit | 658 µs | 12.8 µs | 51x |
+| 256-bit | 1.40 ms | 16.8 µs | 83x |
 
 **Encaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 7.9 ms | 10.0 µs | 790x |
-| 192-bit | 31.8 ms | 14.0 µs | 2270x |
-| 256-bit | 82.5 ms | 19.9 µs | 4140x |
+| 128-bit | 458 µs | 10.0 µs | 46x |
+| 192-bit | 1.44 ms | 14.0 µs | 103x |
+| 256-bit | 3.13 ms | 19.9 µs | 157x |
 
 **Decaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 12.1 ms | 8.3 µs | 1460x |
-| 192-bit | 48.3 ms | 12.9 µs | 3740x |
-| 256-bit | 123.8 ms | 19.6 µs | 6320x |
+| 128-bit | 728 µs | 8.3 µs | 88x |
+| 192-bit | 2.14 ms | 12.9 µs | 166x |
+| 256-bit | 4.81 ms | 19.6 µs | 245x |
 
-syndrmrs is not optimized (yet!) 🤷
+syndrmrs is getting faster! 17-31x improvement from clmul64 word-level carry-less multiply 🏎️
 
 ---
 
