@@ -46,25 +46,25 @@ On my MacBook Pro with Apple M2 Pro, I thought it would be humbling to benchmark
 **KeyGen**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 837 µs | 8.5 µs | 98x |
-| 192-bit | 3.31 ms | 12.8 µs | 259x |
-| 256-bit | 8.46 ms | 16.8 µs | 504x |
+| 128-bit | 723 µs | 8.5 µs | 85x |
+| 192-bit | 2.76 ms | 12.8 µs | 216x |
+| 256-bit | 7.41 ms | 16.8 µs | 441x |
 
 **Encaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 1.61 ms | 10.0 µs | 161x |
-| 192-bit | 6.61 ms | 14.0 µs | 472x |
-| 256-bit | 16.6 ms | 19.9 µs | 834x |
+| 128-bit | 1.38 ms | 10.0 µs | 138x |
+| 192-bit | 5.61 ms | 14.0 µs | 401x |
+| 256-bit | 14.6 ms | 19.9 µs | 734x |
 
 **Decaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 2.47 ms | 8.3 µs | 298x |
-| 192-bit | 9.87 ms | 12.9 µs | 765x |
-| 256-bit | 25.4 ms | 19.6 µs | 1296x |
+| 128-bit | 2.46 ms | 8.3 µs | 296x |
+| 192-bit | 8.13 ms | 12.9 µs | 630x |
+| 256-bit | 22.5 ms | 19.6 µs | 1148x |
 
-~5x improvement from constant-time clmul64 word-level carry-less multiply 🏎️
+~6x improvement from constant-time Karatsuba + clmul64 carry-less multiply 🏎️
 
 ---
 
