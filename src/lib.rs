@@ -1,6 +1,21 @@
 #![no_std]
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
+#![warn(clippy::pedantic)]
+#![allow(
+    // Intentional in GF(256) / constant-time arithmetic
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    // Short names are conventional in polynomial / linear-algebra code
+    clippy::many_single_char_names,
+    clippy::similar_names,
+    // Module-level visibility is fine in private modules
+    clippy::redundant_pub_crate,
+    // Doc backticks in algorithm pseudocode would be noisy
+    clippy::doc_markdown,
+)]
 
 //!
 //! # Security Warning
@@ -85,7 +100,7 @@ pub mod hqc1 {
     ]);
 
     /// HQC-1 parameter set implementation
-    #[derive(Default, Clone, Debug, PartialEq)]
+    #[derive(Default, Clone, Debug, PartialEq, Eq)]
     pub struct Hqc1Params;
 
     impl ParameterSet for Hqc1Params {
@@ -137,7 +152,7 @@ pub mod hqc3 {
     ]);
 
     /// HQC-3 parameter set implementation
-    #[derive(Default, Clone, Debug, PartialEq)]
+    #[derive(Default, Clone, Debug, PartialEq, Eq)]
     pub struct Hqc3Params;
     impl ParameterSet for Hqc3Params {
         const HQC_N: u32 = 35851;
@@ -189,7 +204,7 @@ pub mod hqc5 {
     ]);
 
     /// HQC-5 parameter set implementation
-    #[derive(Default, Clone, Debug, PartialEq)]
+    #[derive(Default, Clone, Debug, PartialEq, Eq)]
     pub struct Hqc5Params;
     impl ParameterSet for Hqc5Params {
         const HQC_N: u32 = 57637;

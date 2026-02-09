@@ -26,7 +26,7 @@ pub use crate::param::Msg;
 const SALT_BYTES: usize = 16;
 
 /// KEM ciphertext: (u, v, salt)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KemCiphertext<P>
 where
     P: ParameterSet,
@@ -36,7 +36,7 @@ where
 }
 
 /// KEM encapsulation key (public key)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KemEncapsulationKey<P>
 where
     P: ParameterSet,
@@ -491,6 +491,16 @@ mod tests {
         implicit_rejection_test::<Hqc1Params>();
     }
 
+    #[test]
+    fn kem_implicit_rejection_hqc3() {
+        implicit_rejection_test::<Hqc3Params>();
+    }
+
+    #[test]
+    fn kem_implicit_rejection_hqc5() {
+        implicit_rejection_test::<Hqc5Params>();
+    }
+
     fn implicit_rejection_test<P: ParameterSet>() {
         // Create test seed
         let mut seed_kem = KemSeed::default();
@@ -523,5 +533,75 @@ mod tests {
 
         // The decapsulated key should NOT match the encapsulated key
         assert_ne!(k_encaps.as_slice(), k_decaps.as_slice());
+    }
+
+    // ---- Serialization roundtrip tests ----
+
+    #[test]
+    fn dk_to_bytes_roundtrip_hqc1() {
+        dk_serialization_test::<Hqc1Params>();
+    }
+
+    #[test]
+    fn dk_to_bytes_roundtrip_hqc3() {
+        dk_serialization_test::<Hqc3Params>();
+    }
+
+    #[test]
+    fn dk_to_bytes_roundtrip_hqc5() {
+        dk_serialization_test::<Hqc5Params>();
+    }
+
+    fn dk_serialization_test<P: ParameterSet>() {
+        let mut seed_kem = KemSeed::default();
+        for (i, byte) in seed_kem.as_mut_slice().iter_mut().enumerate() {
+            *byte = (i * 7 + 13) as u8;
+        }
+
+        let (_ek, dk) = HqcKem::keygen::<P>(&seed_kem);
+        let dk_bytes = dk.to_bytes();
+
+        // Verify the serialized bytes contain known sub-fields
+        assert_eq!(&dk_bytes[dk_bytes.len() - 32..], seed_kem.as_slice());
+    }
+
+    #[test]
+    fn ct_from_bytes_roundtrip_hqc1() {
+        ct_serialization_test::<Hqc1Params>();
+    }
+
+    #[test]
+    fn ct_from_bytes_roundtrip_hqc3() {
+        ct_serialization_test::<Hqc3Params>();
+    }
+
+    #[test]
+    fn ct_from_bytes_roundtrip_hqc5() {
+        ct_serialization_test::<Hqc5Params>();
+    }
+
+    fn ct_serialization_test<P: ParameterSet>() {
+        let mut seed_kem = KemSeed::default();
+        for (i, byte) in seed_kem.as_mut_slice().iter_mut().enumerate() {
+            *byte = (i * 7 + 13) as u8;
+        }
+
+        let (ek, _dk) = HqcKem::keygen::<P>(&seed_kem);
+
+        let mut m = Msg::<P>::default();
+        for (i, byte) in m.as_mut_slice().iter_mut().enumerate() {
+            *byte = (i * 17 + 42) as u8;
+        }
+        let salt = [0x55u8; SALT_BYTES];
+
+        let (_k, ct) = HqcKem::encaps_deterministic::<P>(&ek, &m, &salt);
+
+        // Serialize and deserialize
+        let ct_bytes = ct.to_bytes();
+        let ct2 = KemCiphertext::<P>::from_bytes(ct_bytes.as_slice());
+
+        assert_eq!(ct.c_pke.u.as_slice(), ct2.c_pke.u.as_slice());
+        assert_eq!(ct.c_pke.v.as_slice(), ct2.c_pke.v.as_slice());
+        assert_eq!(ct.salt, ct2.salt);
     }
 }

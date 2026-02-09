@@ -5,8 +5,9 @@
 //!      https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/gf.h (gf_exp/gf_log tables).
 
 #[inline]
+#[must_use]
 #[allow(dead_code)] // XOR is obvious, but kept for API completeness
-pub fn add(a: u16, b: u16) -> u16 {
+pub const fn add(a: u16, b: u16) -> u16 {
     a ^ b
 }
 
@@ -14,6 +15,7 @@ pub fn add(a: u16, b: u16) -> u16 {
 ///
 /// Takes u16 arguments (matching the reference implementation) but assumes values are < 256.
 /// Returns u16 for consistency with syndrome/polynomial computations.
+#[must_use]
 pub fn mul(a: u16, b: u16) -> u16 {
     debug_assert!(a < 256 && b < 256, "GF(256) elements must be < 256");
     if a == 0 || b == 0 {
@@ -26,6 +28,7 @@ pub fn mul(a: u16, b: u16) -> u16 {
 }
 
 /// Computes the multiplicative inverse of an element in GF(256).
+#[must_use]
 pub fn inv(a: u16) -> u16 {
     if a == 0 {
         return 0;
@@ -40,6 +43,7 @@ pub fn inv(a: u16) -> u16 {
 /// In GF(2^m), squaring is a linear operation.
 /// We compute a² = a * a using the multiplication function.
 #[inline]
+#[must_use]
 pub fn square(a: u16) -> u16 {
     mul(a, a)
 }

@@ -136,11 +136,11 @@ impl RM {
     /// Encodes one byte into one RM[1,7] codeword
     pub fn encode_byte(msg: u8) -> RmCodeword {
         let mut first_word: u32 = Self::bit0mask(u32::from(msg >> 7));
-        first_word ^= Self::bit0mask(u32::from(msg)) & 0xaaaaaaaa;
-        first_word ^= Self::bit0mask(u32::from(msg >> 1)) & 0xcccccccc;
-        first_word ^= Self::bit0mask(u32::from(msg >> 2)) & 0xf0f0f0f0;
-        first_word ^= Self::bit0mask(u32::from(msg >> 3)) & 0xff00ff00;
-        first_word ^= Self::bit0mask(u32::from(msg >> 4)) & 0xffff0000;
+        first_word ^= Self::bit0mask(u32::from(msg)) & 0xAAAA_AAAA;
+        first_word ^= Self::bit0mask(u32::from(msg >> 1)) & 0xCCCC_CCCC;
+        first_word ^= Self::bit0mask(u32::from(msg >> 2)) & 0xF0F0_F0F0;
+        first_word ^= Self::bit0mask(u32::from(msg >> 3)) & 0xFF00_FF00;
+        first_word ^= Self::bit0mask(u32::from(msg >> 4)) & 0xFFFF_0000;
 
         let mut u32s = [0u32; 4];
         u32s[0] = first_word;

@@ -26,7 +26,7 @@ use crate::{
 /// The encryption key consists of:
 /// - seed_ek (32 bytes): Used to derive h deterministically
 /// - s (n bytes): Public vector s = h·y + x
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PkeEncryptionKey<P>
 where
     P: ParameterSet,
@@ -49,7 +49,7 @@ impl<P: ParameterSet> PkeEncryptionKey<P> {
 /// PKE decryption key: seed_dk
 ///
 /// The decryption key is just the seed used to derive y.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PkeDecryptionKey<P>
 where
     P: ParameterSet,
@@ -59,7 +59,7 @@ where
 }
 
 /// PKE ciphertext: (u, v) where u is n bits and v is n1*n2 bits
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PkeCiphertext<P>
 where
     P: ParameterSet,
@@ -448,5 +448,37 @@ mod tests {
         let decrypted = HqcPke::decrypt::<P>(&dk, &ct);
 
         assert_eq!(msg.as_slice(), decrypted.as_slice());
+    }
+
+    // ---- Serialization tests ----
+
+    #[test]
+    fn pke_ek_to_bytes_hqc1() {
+        ek_to_bytes_test::<Hqc1Params>();
+    }
+
+    #[test]
+    fn pke_ek_to_bytes_hqc3() {
+        ek_to_bytes_test::<Hqc3Params>();
+    }
+
+    #[test]
+    fn pke_ek_to_bytes_hqc5() {
+        ek_to_bytes_test::<Hqc5Params>();
+    }
+
+    fn ek_to_bytes_test<P: ParameterSet>() {
+        let mut seed_pke = PkeSeed::default();
+        for (i, byte) in seed_pke.as_mut_slice().iter_mut().enumerate() {
+            *byte = (i * 7 + 13) as u8;
+        }
+
+        let (ek, _dk) = HqcPke::keygen::<P>(&seed_pke);
+        let bytes = ek.to_bytes();
+
+        // First 32 bytes should be seed_ek
+        assert_eq!(&bytes[..32], ek.seed_ek.as_slice());
+        // Remaining bytes should be s
+        assert_eq!(&bytes[32..], ek.s.as_slice());
     }
 }

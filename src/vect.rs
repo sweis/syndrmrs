@@ -350,14 +350,77 @@ fn support_to_vect_from_slice<P: ParameterSet>(support: &[u32]) -> Vect<P> {
 /// In GF(2), addition is the same as XOR. This operation is used throughout
 /// the HQC scheme for combining vectors.
 ///
-/// https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3
+/// XORs at u64 width for throughput, then handles any trailing bytes.
+///
+/// <https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3>
 #[inline]
 pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     let mut result = Vect::<P>::default();
-    for i in 0..a.len() {
-        result[i] = a[i] ^ b[i];
+    let n = a.len();
+    let chunks = n / 8;
+    let remainder = n % 8;
+
+    // XOR 8 bytes at a time via u64
+    for i in 0..chunks {
+        let off = i * 8;
+        let wa = u64::from_le_bytes(a[off..off + 8].try_into().unwrap());
+        let wb = u64::from_le_bytes(b[off..off + 8].try_into().unwrap());
+        result[off..off + 8].copy_from_slice(&(wa ^ wb).to_le_bytes());
     }
+
+    // Handle trailing bytes
+    let tail = chunks * 8;
+    for i in 0..remainder {
+        result[tail + i] = a[tail + i] ^ b[tail + i];
+    }
+
     result
+}
+
+/// Carry-less multiply of two 64-bit binary polynomials over GF(2).
+///
+/// Returns `(lo, hi)` where the 128-bit product = `(hi << 64) | lo`.
+/// Uses 4-bit windowed lookup: precompute `a * {0..15}`, then process `b`
+/// one nibble at a time. This is ~4x faster than the bit-at-a-time approach.
+///
+/// The product of a 64-bit poly and a 4-bit poly can be up to 67 bits,
+/// so we track a 3-bit overflow per table entry (`tab_hi`).
+#[inline]
+fn clmul64(a: u64, b: u64) -> (u64, u64) {
+    // tab[i] = low 64 bits of (a * i) carry-less
+    // tab_hi[i] = bits 64-66 of (a * i) carry-less (at most 3 bits)
+    let mut tab = [0u64; 16];
+    let mut tab_hi = [0u8; 16];
+
+    tab[1] = a;
+    // tab_hi[1] = 0 (a * 1 fits in 64 bits)
+
+    for i in 2..16usize {
+        let half = i >> 1;
+        // Double: (a * i/2) << 1, tracking overflow from bit 63
+        tab[i] = tab[half] << 1;
+        tab_hi[i] = (tab_hi[half] << 1) | (tab[half] >> 63) as u8;
+        if i & 1 != 0 {
+            // Add a: a fits in 64 bits so only low part changes
+            tab[i] ^= a;
+        }
+    }
+
+    // First nibble: no positional shift needed
+    let mut lo = tab[(b & 0xF) as usize];
+    let mut hi = u64::from(tab_hi[(b & 0xF) as usize]);
+
+    // Remaining 15 nibbles: shift by k*4 bits and accumulate
+    for k in 1..16u32 {
+        let nibble = ((b >> (k * 4)) & 0xF) as usize;
+        let t = tab[nibble];
+        let t_over = u64::from(tab_hi[nibble]);
+        let shift = k * 4;
+        lo ^= t << shift;
+        hi ^= (t >> (64 - shift)) | (t_over << shift);
+    }
+
+    (lo, hi)
 }
 
 /// Vector multiplication in F_2^n (polynomial multiplication mod X^n - 1).
@@ -366,72 +429,58 @@ pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
 /// ring F_2[X]/(X^n - 1), where n = HQC_N.
 ///
 /// Algorithm:
-/// 1. Schoolbook multiplication to get a polynomial of degree up to 2n-2
-/// 2. Reduce modulo X^n - 1 (since X^n = 1, we fold high-degree terms back)
+/// 1. Schoolbook multiplication using 4-bit windowed carry-less word multiply
+/// 2. Zero-word skipping (HQC vectors are often sparse, weight 66-149)
+/// 3. Reduce modulo X^n - 1 (fold high-degree terms back)
 ///
-/// This can be optimized using FFT-based methods (see Brent & Zimmermann),
-/// but we use schoolbook multiplication for clarity and simplicity.
-///
-/// https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3
-/// https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/gf2x.c#L29-60
-/// https://maths-people.anu.edu.au/~brent/pd/rpb232tr.pdf
+/// <https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3>
+/// <https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/gf2x.c#L29-60>
 pub(crate) fn vect_mul<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     let n = P::HQC_N as usize;
     let n_bytes = a.len();
 
-    // Convert bytes to u64 words for efficient bit manipulation
+    // Convert bytes to u64 words using from_le_bytes
     let mut a_words = VectNWords::<P>::default();
     let mut b_words = VectNWords::<P>::default();
-
     let n_words = a_words.len();
 
     for i in 0..n_words {
-        let byte_start = i * 8;
-        let byte_end = (byte_start + 8).min(n_bytes);
-        for j in byte_start..byte_end {
-            let word_byte_idx = j - byte_start;
-            a_words[i] |= u64::from(a[j]) << (word_byte_idx * 8);
-            b_words[i] |= u64::from(b[j]) << (word_byte_idx * 8);
-        }
+        let off = i * 8;
+        let end = (off + 8).min(n_bytes);
+        let mut buf_a = [0u8; 8];
+        buf_a[..end - off].copy_from_slice(&a[off..end]);
+        a_words[i] = u64::from_le_bytes(buf_a);
+
+        let mut buf_b = [0u8; 8];
+        buf_b[..end - off].copy_from_slice(&b[off..end]);
+        b_words[i] = u64::from_le_bytes(buf_b);
     }
 
-    // Schoolbook multiplication: result can be up to 2*n_words
+    // Schoolbook multiplication with clmul64 word-level multiply.
+    // Zero-word skipping exploits that HQC typically multiplies a dense
+    // vector (h from XOF) by a sparse one (weight 66-149 out of 17669-57637 bits),
+    // so most u64 words of the sparse operand are zero.
     let mut mul_res = VectNWords2::<P>::default();
 
-    // Enumerate every 64-bit word of a
     for i in 0..n_words {
-        // Enumerate every bit of the i-th word of a
-        for bit_index in 0..64 {
-            // Mask to isolate the bit_index-th bit of a
-            let mask = (-(((a_words[i] >> bit_index) & 1) as i64)) as u64;
-
-            if bit_index == 0 {
-                // The first bit of a has order 0, so when we multiply with
-                // the j-th bit of b, the result has order j. So if the i-th
-                // bit is 1, we just copy over the j-th bit of b
-                for j in 0..n_words {
-                    mul_res[i + j] ^= b_words[j] & mask;
-                }
-            } else {
-                for j in 0..n_words {
-                    // The bit_index-th bit of a has order bit_index, so
-                    // when we multiply with the j-th bit of b, the result
-                    // has order bit_index+j. So if the bit_index-th bit is
-                    // 1, we copy but offset by bit_index
-                    mul_res[i + j] ^= (b_words[j] << bit_index) & mask;
-                    mul_res[i + j + 1] ^= (b_words[j] >> (64 - bit_index)) & mask;
-                }
+        if a_words[i] == 0 {
+            continue;
+        }
+        for j in 0..n_words {
+            if b_words[j] == 0 {
+                continue;
             }
+            let (lo, hi) = clmul64(a_words[i], b_words[j]);
+            mul_res[i + j] ^= lo;
+            mul_res[i + j + 1] ^= hi;
         }
     }
 
-    // Now reduce modulo (X^n - 1)
-    // Interpret mul_res as a polynomial and reduce modulo (X^{HQC_N} - 1)
-    // That is X^{HQC_N} = 1, X^{HQC_N+1} = X,...
+    // Reduce modulo (X^n - 1): X^n = 1, so fold high-degree terms back
     let mut out_words = VectNWords::<P>::default();
     for i in 0..n_words {
-        let r = mul_res[i + n_words - 1] >> (n & 0b111111);
-        let carry = mul_res[i + n_words] << (64 - (n & 0b111111));
+        let r = mul_res[i + n_words - 1] >> (n & 0b11_1111);
+        let carry = mul_res[i + n_words] << (64 - (n & 0b11_1111));
         out_words[i] = mul_res[i] ^ r ^ carry;
     }
 
@@ -442,15 +491,13 @@ pub(crate) fn vect_mul<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
         out_words[n_words - 1] &= mask;
     }
 
-    // Convert back to bytes
+    // Convert back to bytes using to_le_bytes
     let mut result = Vect::<P>::default();
     for i in 0..n_words {
-        let byte_start = i * 8;
-        let byte_end = (byte_start + 8).min(n_bytes);
-        for j in byte_start..byte_end {
-            let word_byte_idx = j - byte_start;
-            result[j] = (out_words[i] >> (word_byte_idx * 8)) as u8;
-        }
+        let off = i * 8;
+        let end = (off + 8).min(n_bytes);
+        let bytes = out_words[i].to_le_bytes();
+        result[off..end].copy_from_slice(&bytes[..end - off]);
     }
 
     result
