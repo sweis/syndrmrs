@@ -377,15 +377,23 @@ pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     result
 }
 
-/// Precomputed 4-bit lookup table for carry-less multiplication by `a`.
+// ============================================================================
+// Carry-less multiplication: hardware (PCLMULQDQ) or software (4-bit table)
+// ============================================================================
+
+/// Software 4-bit lookup table for carry-less multiplication by `a`.
 ///
 /// `tab[i]` = low 64 bits of `a * i` (carry-less), for i in 0..15.
 /// `tab_hi[i]` = bits 64-66 of `a * i` (at most 3 bits, since 64-bit * 4-bit = 67-bit max).
+///
+/// Used as fallback when hardware PCLMULQDQ is not available.
+#[cfg(not(all(target_arch = "x86_64", target_feature = "pclmulqdq")))]
 struct ClmulTable {
     tab: [u64; 16],
     tab_hi: [u8; 16],
 }
 
+#[cfg(not(all(target_arch = "x86_64", target_feature = "pclmulqdq")))]
 impl ClmulTable {
     /// Build the lookup table for carry-less multiplication by `a`.
     #[inline]
@@ -435,12 +443,49 @@ impl ClmulTable {
 /// `out` must have at least `a.len() + b.len()` entries and be pre-zeroed.
 ///
 /// Constant-time: processes all word pairs regardless of content.
+///
+/// When compiled with `-C target-feature=+pclmulqdq` (x86_64), uses the
+/// hardware carry-less multiply instruction for ~10x faster per-word
+/// multiplication. Otherwise falls back to the software `ClmulTable`.
 #[inline]
 fn schoolbook_mul(a: &[u64], b: &[u64], out: &mut [u64]) {
+    #[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]
+    // SAFETY: target_feature = "pclmulqdq" is guaranteed by the cfg guard.
+    unsafe {
+        schoolbook_mul_pclmulqdq(a, b, out);
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "pclmulqdq")))]
+    {
+        for i in 0..a.len() {
+            let table = ClmulTable::new(a[i]);
+            for j in 0..b.len() {
+                let (lo, hi) = table.clmul(b[j]);
+                out[i + j] ^= lo;
+                out[i + j + 1] ^= hi;
+            }
+        }
+    }
+}
+
+/// Hardware-accelerated schoolbook multiply using x86_64 PCLMULQDQ.
+///
+/// Each 64x64 carry-less multiply is a single instruction (~3 cycles)
+/// instead of the ~50-cycle software lookup table approach.
+#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]
+#[target_feature(enable = "pclmulqdq")]
+unsafe fn schoolbook_mul_pclmulqdq(a: &[u64], b: &[u64], out: &mut [u64]) {
+    use core::arch::x86_64::{_mm_clmulepi64_si128, _mm_set_epi64x};
+
     for i in 0..a.len() {
-        let table = ClmulTable::new(a[i]);
+        // SAFETY: pclmulqdq is guaranteed by target_feature attribute.
+        let va = _mm_set_epi64x(0, a[i] as i64);
         for j in 0..b.len() {
-            let (lo, hi) = table.clmul(b[j]);
+            let [lo, hi]: [u64; 2] = unsafe {
+                let vb = _mm_set_epi64x(0, b[j] as i64);
+                let r = _mm_clmulepi64_si128(va, vb, 0x00);
+                core::mem::transmute::<core::arch::x86_64::__m128i, [u64; 2]>(r)
+            };
             out[i + j] ^= lo;
             out[i + j + 1] ^= hi;
         }

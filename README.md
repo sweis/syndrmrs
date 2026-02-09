@@ -36,35 +36,39 @@ cargo test --release -- --ignored
 
 Run benchmarks with:
 ```bash
+# Software carry-less multiply (any platform)
 cargo bench --bench kem
+
+# Hardware PCLMULQDQ (x86_64 with SSE2 + PCLMULQDQ)
+RUSTFLAGS="-C target-feature=+pclmulqdq" cargo bench --bench kem
 ```
 
 #### Informal Results
 
-On my MacBook Pro with Apple M2 Pro, I thought it would be humbling to benchmark this against ML-KEM from aws-lc-rs 1.15.4 at equivalent security levels. I was right. Note that these are entirely different algorithms, so the comparison isn't really fair — but neither are the numbers, so it fits.
+I thought it would be humbling to benchmark this against ML-KEM from aws-lc-rs 1.15.4 at equivalent security levels. I was right. Note that these are entirely different algorithms, so the comparison isn't really fair — but neither are the numbers, so it fits.
 
 **KeyGen**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 723 µs | 8.5 µs | 85x |
-| 192-bit | 2.76 ms | 12.8 µs | 216x |
-| 256-bit | 7.41 ms | 16.8 µs | 441x |
+| 128-bit | 74 µs | 22 µs | 3.4x |
+| 192-bit | 265 µs | 33 µs | 8.0x |
+| 256-bit | 627 µs | 49 µs | 12.8x |
 
 **Encaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 1.38 ms | 10.0 µs | 138x |
-| 192-bit | 5.61 ms | 14.0 µs | 401x |
-| 256-bit | 14.6 ms | 19.9 µs | 734x |
+| 128-bit | 146 µs | 25 µs | 5.8x |
+| 192-bit | 527 µs | 39 µs | 13.5x |
+| 256-bit | 1.24 ms | 53 µs | 23.4x |
 
 **Decaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 2.46 ms | 8.3 µs | 296x |
-| 192-bit | 8.13 ms | 12.9 µs | 630x |
-| 256-bit | 22.5 ms | 19.6 µs | 1148x |
+| 128-bit | 230 µs | 15 µs | 15.3x |
+| 192-bit | 844 µs | 23 µs | 36.7x |
+| 256-bit | 2.01 ms | 34 µs | 59.1x |
 
-~6x improvement from constant-time Karatsuba + clmul64 carry-less multiply 🏎️
+~55x improvement from constant-time Karatsuba + hardware PCLMULQDQ carry-less multiply 🏎️
 
 ---
 
