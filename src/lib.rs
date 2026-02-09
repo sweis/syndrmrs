@@ -3,7 +3,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(
-    // Intentional in GF(256) / constant-time arithmetic
+    // Intentional in GF(256) / crypto arithmetic
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,

@@ -10,7 +10,7 @@ Educational Rust implementation of Hamming Quasi-Cyclic (HQC) KEM as described i
 
 - This is an **experimental** implementation of a **draft** standard
 - It has **not** been audited
-- Timing side-channels may still exist in some code paths
+- It is **not** constant-time (timing side-channels may exist)
 - The API is unstable and will change without notice
 - We make **no security guarantees whatsoever**
 
@@ -36,39 +36,35 @@ cargo test --release -- --ignored
 
 Run benchmarks with:
 ```bash
-# Software carry-less multiply (any platform)
 cargo bench --bench kem
-
-# Hardware PCLMULQDQ (x86_64 with SSE2 + PCLMULQDQ)
-RUSTFLAGS="-C target-feature=+pclmulqdq" cargo bench --bench kem
 ```
 
 #### Informal Results
 
-I thought it would be humbling to benchmark this against ML-KEM from aws-lc-rs 1.15.4 at equivalent security levels. I was right. Note that these are entirely different algorithms, so the comparison isn't really fair — but neither are the numbers, so it fits.
+On my MacBook Pro with Apple M2 Pro, I thought it would be humbling to benchmark this against ML-KEM from aws-lc-rs 1.15.4 at equivalent security levels. I was right. Note that these are entirely different algorithms, so the comparison isn't really fair — but neither are the numbers, so it fits.
 
 **KeyGen**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 74 µs | 22 µs | 3.4x |
-| 192-bit | 265 µs | 33 µs | 8.0x |
-| 256-bit | 627 µs | 49 µs | 12.8x |
+| 128-bit | 4.0 ms | 8.5 µs | 470x |
+| 192-bit | 16.1 ms | 12.8 µs | 1260x |
+| 256-bit | 41.4 ms | 16.8 µs | 2460x |
 
 **Encaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 146 µs | 25 µs | 5.8x |
-| 192-bit | 527 µs | 39 µs | 13.5x |
-| 256-bit | 1.24 ms | 53 µs | 23.4x |
+| 128-bit | 7.9 ms | 10.0 µs | 790x |
+| 192-bit | 31.8 ms | 14.0 µs | 2270x |
+| 256-bit | 82.5 ms | 19.9 µs | 4140x |
 
 **Decaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 230 µs | 15 µs | 15.3x |
-| 192-bit | 844 µs | 23 µs | 36.7x |
-| 256-bit | 2.01 ms | 34 µs | 59.1x |
+| 128-bit | 12.1 ms | 8.3 µs | 1460x |
+| 192-bit | 48.3 ms | 12.9 µs | 3740x |
+| 256-bit | 123.8 ms | 19.6 µs | 6320x |
 
-~55x improvement from constant-time Karatsuba + hardware PCLMULQDQ carry-less multiply 🏎️
+syndrmrs is not optimized (yet!) 🤷
 
 ---
 

@@ -4,6 +4,8 @@
 //! Ref: https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/hqc-1/parameters.h (PARAM_GF_POLY = 0x11D),
 //!      https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/gf.h (gf_exp/gf_log tables).
 
+use subtle::{ConditionallySelectable, ConstantTimeEq};
+
 #[inline]
 #[must_use]
 #[allow(dead_code)] // XOR is obvious, but kept for API completeness
@@ -16,32 +18,31 @@ pub const fn add(a: u16, b: u16) -> u16 {
 /// Takes u16 arguments (matching the reference implementation) but assumes values are < 256.
 /// Returns u16 for consistency with syndrome/polynomial computations.
 ///
-/// Constant-time: no branching on input values. Uses a zero mask to handle the
-/// `a == 0 || b == 0` case without an early return.
+/// Uses the `subtle` crate to select between 0 and the table result without branching.
 #[must_use]
 pub fn mul(a: u16, b: u16) -> u16 {
     debug_assert!(a < 256 && b < 256, "GF(256) elements must be < 256");
-    // Constant-time zero mask: 0xFFFF if both a and b are nonzero, else 0
-    let nonzero = ((a | a.wrapping_neg()) >> 15) & ((b | b.wrapping_neg()) >> 15);
-    let mask = 0u16.wrapping_sub(nonzero);
 
     let log_a = GF_LOG[a as usize] as usize;
     let log_b = GF_LOG[b as usize] as usize;
     let idx = (log_a + log_b) % 255;
-    GF_EXP[idx] & mask
+    let result = GF_EXP[idx];
+
+    let either_zero = a.ct_eq(&0) | b.ct_eq(&0);
+    u16::conditional_select(&result, &0, either_zero)
 }
 
 /// Computes the multiplicative inverse of an element in GF(256).
 ///
-/// Constant-time: no branching on input value. Uses a zero mask to handle inv(0) = 0.
+/// Uses the `subtle` crate to select between 0 and the table result without branching.
 #[must_use]
 pub fn inv(a: u16) -> u16 {
-    let nonzero = (a | a.wrapping_neg()) >> 15;
-    let mask = 0u16.wrapping_sub(nonzero);
-
     let log_a = GF_LOG[a as usize] as usize;
     let idx = (255 - log_a) % 255;
-    GF_EXP[idx] & mask
+    let result = GF_EXP[idx];
+
+    let is_zero = a.ct_eq(&0);
+    u16::conditional_select(&result, &0, is_zero)
 }
 
 /// Squares an element in GF(256).

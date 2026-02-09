@@ -387,13 +387,19 @@ pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
 /// `tab_hi[i]` = bits 64-66 of `a * i` (at most 3 bits, since 64-bit * 4-bit = 67-bit max).
 ///
 /// Used as fallback when hardware PCLMULQDQ is not available.
-#[cfg(not(all(target_arch = "x86_64", target_feature = "pclmulqdq")))]
+#[cfg(all(
+    feature = "fast-mul",
+    not(all(target_arch = "x86_64", target_feature = "pclmulqdq"))
+))]
 struct ClmulTable {
     tab: [u64; 16],
     tab_hi: [u8; 16],
 }
 
-#[cfg(not(all(target_arch = "x86_64", target_feature = "pclmulqdq")))]
+#[cfg(all(
+    feature = "fast-mul",
+    not(all(target_arch = "x86_64", target_feature = "pclmulqdq"))
+))]
 impl ClmulTable {
     /// Build the lookup table for carry-less multiplication by `a`.
     #[inline]
@@ -437,16 +443,16 @@ impl ClmulTable {
     }
 }
 
-/// Schoolbook polynomial multiplication over GF(2) at the u64 word level.
+/// Word-level schoolbook polynomial multiplication over GF(2).
 ///
 /// Multiplies `a` by `b`, XORing the result into `out`.
 /// `out` must have at least `a.len() + b.len()` entries and be pre-zeroed.
 ///
-/// Constant-time: processes all word pairs regardless of content.
-///
-/// When compiled with `-C target-feature=+pclmulqdq` (x86_64), uses the
-/// hardware carry-less multiply instruction for ~10x faster per-word
-/// multiplication. Otherwise falls back to the software `ClmulTable`.
+/// When the `fast-mul` feature is enabled and compiled with
+/// `-C target-feature=+pclmulqdq` (x86_64), uses the hardware carry-less
+/// multiply instruction. With `fast-mul` alone, uses a software 4-bit
+/// lookup table. Without `fast-mul`, uses bit-at-a-time schoolbook.
+#[cfg(feature = "fast-mul")]
 #[inline]
 fn schoolbook_mul(a: &[u64], b: &[u64], out: &mut [u64]) {
     #[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]
@@ -472,7 +478,11 @@ fn schoolbook_mul(a: &[u64], b: &[u64], out: &mut [u64]) {
 ///
 /// Each 64x64 carry-less multiply is a single instruction (~3 cycles)
 /// instead of the ~50-cycle software lookup table approach.
-#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]
+#[cfg(all(
+    feature = "fast-mul",
+    target_arch = "x86_64",
+    target_feature = "pclmulqdq"
+))]
 #[target_feature(enable = "pclmulqdq")]
 unsafe fn schoolbook_mul_pclmulqdq(a: &[u64], b: &[u64], out: &mut [u64]) {
     use core::arch::x86_64::{_mm_clmulepi64_si128, _mm_set_epi64x};
@@ -493,6 +503,7 @@ unsafe fn schoolbook_mul_pclmulqdq(a: &[u64], b: &[u64], out: &mut [u64]) {
 }
 
 /// XOR `src` into the beginning of `dst` (element-wise).
+#[cfg(feature = "karatsuba")]
 #[inline]
 fn xor_words(dst: &mut [u64], src: &[u64]) {
     for (d, s) in dst.iter_mut().zip(src) {
@@ -505,16 +516,12 @@ fn xor_words(dst: &mut [u64], src: &[u64]) {
 /// Interprets vectors as polynomials over GF(2) and multiplies them in the
 /// ring F_2[X]/(X^n - 1), where n = HQC_N.
 ///
-/// Uses one level of Karatsuba to reduce the O(n²) schoolbook cost by ~25%:
-/// split each operand in half, compute 3 half-size products instead of 4.
+/// # Optimization features
 ///
-/// # Constant-time note
-///
-/// This function executes in time independent of the vector contents. There
-/// are no secret-dependent branches or memory accesses - every word pair is
-/// always processed. This is critical because one operand may be a secret key
-/// vector (e.g. `y` in decapsulation) and the other may be attacker-controlled
-/// (e.g. ciphertext `u`).
+/// - Default: bit-at-a-time schoolbook multiplication (educational, easy to follow)
+/// - `fast-mul`: word-level carry-less multiply via software lookup table or
+///   hardware PCLMULQDQ (when `-C target-feature=+pclmulqdq` is set)
+/// - `karatsuba`: one level of Karatsuba splitting (implies `fast-mul`)
 ///
 /// <https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3>
 /// <https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/gf2x.c#L29-60>
@@ -539,53 +546,82 @@ pub(crate) fn vect_mul<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
         b_words[i] = u64::from_le_bytes(buf_b);
     }
 
-    // One level of Karatsuba: split each operand at m = n_words / 2.
-    //
-    // a = a_lo + a_hi * x^m,  b = b_lo + b_hi * x^m
-    // a*b = z0 + z1*x^m + z2*x^(2m)
-    //
-    // where:
-    //   z0 = a_lo * b_lo                              (m × m)
-    //   z2 = a_hi * b_hi                              (hi_len × hi_len)
-    //   z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2 (hi_len × hi_len)
-    //
-    // 3 half-size multiplications instead of 1 full-size → ~25% fewer clmul ops.
-    let m = n_words / 2;
-    let hi_len = n_words - m;
-
     let mut mul_res = VectNWords2::<P>::default();
 
-    // z0 = a_lo * b_lo → mul_res[0..2m]
-    schoolbook_mul(&a_words[..m], &b_words[..m], &mut mul_res[..2 * m]);
+    #[cfg(feature = "karatsuba")]
+    {
+        // One level of Karatsuba: split each operand at m = n_words / 2.
+        //
+        // a = a_lo + a_hi * x^m,  b = b_lo + b_hi * x^m
+        // a*b = z0 + z1*x^m + z2*x^(2m)
+        //
+        // where:
+        //   z0 = a_lo * b_lo                              (m × m)
+        //   z2 = a_hi * b_hi                              (hi_len × hi_len)
+        //   z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2 (hi_len × hi_len)
+        //
+        // 3 half-size multiplications instead of 1 full-size.
+        let m = n_words / 2;
+        let hi_len = n_words - m;
 
-    // z2 = a_hi * b_hi → mul_res[2m..2m + 2*hi_len]
-    schoolbook_mul(
-        &a_words[m..n_words],
-        &b_words[m..n_words],
-        &mut mul_res[2 * m..2 * m + 2 * hi_len],
-    );
+        // z0 = a_lo * b_lo → mul_res[0..2m]
+        schoolbook_mul(&a_words[..m], &b_words[..m], &mut mul_res[..2 * m]);
 
-    // Compute sums: a_sum = a_lo + a_hi, b_sum = b_lo + b_hi (hi_len words each)
-    let mut a_sum = VectNWords::<P>::default();
-    let mut b_sum = VectNWords::<P>::default();
-    a_sum[..hi_len].copy_from_slice(&a_words[m..n_words]);
-    b_sum[..hi_len].copy_from_slice(&b_words[m..n_words]);
-    xor_words(&mut a_sum[..m], &a_words[..m]);
-    xor_words(&mut b_sum[..m], &b_words[..m]);
+        // z2 = a_hi * b_hi → mul_res[2m..2m + 2*hi_len]
+        schoolbook_mul(
+            &a_words[m..n_words],
+            &b_words[m..n_words],
+            &mut mul_res[2 * m..2 * m + 2 * hi_len],
+        );
 
-    // z1_full = (a_lo + a_hi) * (b_lo + b_hi)
-    let mut z1 = VectNWords2::<P>::default();
-    schoolbook_mul(&a_sum[..hi_len], &b_sum[..hi_len], &mut z1[..2 * hi_len]);
+        // Compute sums: a_sum = a_lo + a_hi, b_sum = b_lo + b_hi
+        let mut a_sum = VectNWords::<P>::default();
+        let mut b_sum = VectNWords::<P>::default();
+        a_sum[..hi_len].copy_from_slice(&a_words[m..n_words]);
+        b_sum[..hi_len].copy_from_slice(&b_words[m..n_words]);
+        xor_words(&mut a_sum[..m], &a_words[..m]);
+        xor_words(&mut b_sum[..m], &b_words[..m]);
 
-    // z1 = z1_full - z0 - z2 (subtraction = XOR in GF(2))
-    xor_words(&mut z1[..2 * m], &mul_res[..2 * m]);
-    xor_words(
-        &mut z1[..2 * hi_len],
-        &mul_res[2 * m..2 * m + 2 * hi_len],
-    );
+        // z1_full = (a_lo + a_hi) * (b_lo + b_hi)
+        let mut z1 = VectNWords2::<P>::default();
+        schoolbook_mul(&a_sum[..hi_len], &b_sum[..hi_len], &mut z1[..2 * hi_len]);
 
-    // Add z1 * x^m into result
-    xor_words(&mut mul_res[m..m + 2 * hi_len], &z1[..2 * hi_len]);
+        // z1 = z1_full - z0 - z2 (subtraction = XOR in GF(2))
+        xor_words(&mut z1[..2 * m], &mul_res[..2 * m]);
+        xor_words(
+            &mut z1[..2 * hi_len],
+            &mul_res[2 * m..2 * m + 2 * hi_len],
+        );
+
+        // Add z1 * x^m into result
+        xor_words(&mut mul_res[m..m + 2 * hi_len], &z1[..2 * hi_len]);
+    }
+
+    #[cfg(all(feature = "fast-mul", not(feature = "karatsuba")))]
+    {
+        schoolbook_mul(&a_words[..n_words], &b_words[..n_words], &mut mul_res);
+    }
+
+    #[cfg(not(feature = "fast-mul"))]
+    {
+        // Bit-at-a-time schoolbook multiplication (educational default)
+        for i in 0..n_words {
+            for bit_index in 0..64 {
+                let mask = (-(((a_words[i] >> bit_index) & 1) as i64)) as u64;
+
+                if bit_index == 0 {
+                    for j in 0..n_words {
+                        mul_res[i + j] ^= b_words[j] & mask;
+                    }
+                } else {
+                    for j in 0..n_words {
+                        mul_res[i + j] ^= (b_words[j] << bit_index) & mask;
+                        mul_res[i + j + 1] ^= (b_words[j] >> (64 - bit_index)) & mask;
+                    }
+                }
+            }
+        }
+    }
 
     // Reduce modulo (X^n - 1): X^n = 1, so fold high-degree terms back
     let mut out_words = VectNWords::<P>::default();
