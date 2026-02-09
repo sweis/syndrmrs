@@ -10,7 +10,7 @@ Educational Rust implementation of Hamming Quasi-Cyclic (HQC) KEM as described i
 
 - This is an **experimental** implementation of a **draft** standard
 - It has **not** been audited
-- It is **not** constant-time (timing side-channels may exist)
+- Timing side-channels may still exist in some code paths
 - The API is unstable and will change without notice
 - We make **no security guarantees whatsoever**
 
@@ -46,25 +46,25 @@ On my MacBook Pro with Apple M2 Pro, I thought it would be humbling to benchmark
 **KeyGen**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 214 µs | 8.5 µs | 25x |
-| 192-bit | 658 µs | 12.8 µs | 51x |
-| 256-bit | 1.40 ms | 16.8 µs | 83x |
+| 128-bit | 837 µs | 8.5 µs | 98x |
+| 192-bit | 3.31 ms | 12.8 µs | 259x |
+| 256-bit | 8.46 ms | 16.8 µs | 504x |
 
 **Encaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 458 µs | 10.0 µs | 46x |
-| 192-bit | 1.44 ms | 14.0 µs | 103x |
-| 256-bit | 3.13 ms | 19.9 µs | 157x |
+| 128-bit | 1.61 ms | 10.0 µs | 161x |
+| 192-bit | 6.61 ms | 14.0 µs | 472x |
+| 256-bit | 16.6 ms | 19.9 µs | 834x |
 
 **Decaps**
 | Security | syndrmrs | aws-lc-rs | slowdown |
 |----------|----------|-----------|----------|
-| 128-bit | 728 µs | 8.3 µs | 88x |
-| 192-bit | 2.14 ms | 12.9 µs | 166x |
-| 256-bit | 4.81 ms | 19.6 µs | 245x |
+| 128-bit | 2.47 ms | 8.3 µs | 298x |
+| 192-bit | 9.87 ms | 12.9 µs | 765x |
+| 256-bit | 25.4 ms | 19.6 µs | 1296x |
 
-syndrmrs is getting faster! 17-31x improvement from clmul64 word-level carry-less multiply 🏎️
+~5x improvement from constant-time clmul64 word-level carry-less multiply 🏎️
 
 ---
 

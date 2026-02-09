@@ -377,6 +377,58 @@ pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     result
 }
 
+/// Precomputed 4-bit lookup table for carry-less multiplication by `a`.
+///
+/// `tab[i]` = low 64 bits of `a * i` (carry-less), for i in 0..15.
+/// `tab_hi[i]` = bits 64-66 of `a * i` (at most 3 bits, since 64-bit * 4-bit = 67-bit max).
+struct ClmulTable {
+    tab: [u64; 16],
+    tab_hi: [u8; 16],
+}
+
+impl ClmulTable {
+    /// Build the lookup table for carry-less multiplication by `a`.
+    #[inline]
+    fn new(a: u64) -> Self {
+        let mut tab = [0u64; 16];
+        let mut tab_hi = [0u8; 16];
+
+        tab[1] = a;
+
+        for i in 2..16usize {
+            let half = i >> 1;
+            tab[i] = tab[half] << 1;
+            tab_hi[i] = (tab_hi[half] << 1) | (tab[half] >> 63) as u8;
+            if i & 1 != 0 {
+                tab[i] ^= a;
+            }
+        }
+
+        Self { tab, tab_hi }
+    }
+
+    /// Carry-less multiply `a * b` using the precomputed table for `a`.
+    ///
+    /// Returns `(lo, hi)` where the 128-bit product = `(hi << 64) | lo`.
+    /// Processes `b` one nibble at a time using the lookup table.
+    #[inline]
+    fn clmul(&self, b: u64) -> (u64, u64) {
+        let mut lo = self.tab[(b & 0xF) as usize];
+        let mut hi = u64::from(self.tab_hi[(b & 0xF) as usize]);
+
+        for k in 1..16u32 {
+            let nibble = ((b >> (k * 4)) & 0xF) as usize;
+            let t = self.tab[nibble];
+            let t_over = u64::from(self.tab_hi[nibble]);
+            let shift = k * 4;
+            lo ^= t << shift;
+            hi ^= (t >> (64 - shift)) | (t_over << shift);
+        }
+
+        (lo, hi)
+    }
+}
+
 /// Carry-less multiply of two 64-bit binary polynomials over GF(2).
 ///
 /// Returns `(lo, hi)` where the 128-bit product = `(hi << 64) | lo`.
@@ -387,40 +439,7 @@ pub(crate) fn vect_add<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
 /// so we track a 3-bit overflow per table entry (`tab_hi`).
 #[inline]
 fn clmul64(a: u64, b: u64) -> (u64, u64) {
-    // tab[i] = low 64 bits of (a * i) carry-less
-    // tab_hi[i] = bits 64-66 of (a * i) carry-less (at most 3 bits)
-    let mut tab = [0u64; 16];
-    let mut tab_hi = [0u8; 16];
-
-    tab[1] = a;
-    // tab_hi[1] = 0 (a * 1 fits in 64 bits)
-
-    for i in 2..16usize {
-        let half = i >> 1;
-        // Double: (a * i/2) << 1, tracking overflow from bit 63
-        tab[i] = tab[half] << 1;
-        tab_hi[i] = (tab_hi[half] << 1) | (tab[half] >> 63) as u8;
-        if i & 1 != 0 {
-            // Add a: a fits in 64 bits so only low part changes
-            tab[i] ^= a;
-        }
-    }
-
-    // First nibble: no positional shift needed
-    let mut lo = tab[(b & 0xF) as usize];
-    let mut hi = u64::from(tab_hi[(b & 0xF) as usize]);
-
-    // Remaining 15 nibbles: shift by k*4 bits and accumulate
-    for k in 1..16u32 {
-        let nibble = ((b >> (k * 4)) & 0xF) as usize;
-        let t = tab[nibble];
-        let t_over = u64::from(tab_hi[nibble]);
-        let shift = k * 4;
-        lo ^= t << shift;
-        hi ^= (t >> (64 - shift)) | (t_over << shift);
-    }
-
-    (lo, hi)
+    ClmulTable::new(a).clmul(b)
 }
 
 /// Vector multiplication in F_2^n (polynomial multiplication mod X^n - 1).
@@ -430,8 +449,15 @@ fn clmul64(a: u64, b: u64) -> (u64, u64) {
 ///
 /// Algorithm:
 /// 1. Schoolbook multiplication using 4-bit windowed carry-less word multiply
-/// 2. Zero-word skipping (HQC vectors are often sparse, weight 66-149)
-/// 3. Reduce modulo X^n - 1 (fold high-degree terms back)
+/// 2. Reduce modulo X^n - 1 (fold high-degree terms back)
+///
+/// # Constant-time note
+///
+/// This function executes in time independent of the vector contents. There
+/// are no secret-dependent branches or memory accesses - every word pair is
+/// always processed. This is critical because one operand may be a secret key
+/// vector (e.g. `y` in decapsulation) and the other may be attacker-controlled
+/// (e.g. ciphertext `u`).
 ///
 /// <https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf#subsection.3.3>
 /// <https://gitlab.com/pqc-hqc/hqc/-/blob/d622142a50f3ce6b6e1f5b15a5119d96c67194e0/src/ref/gf2x.c#L29-60>
@@ -457,20 +483,18 @@ pub(crate) fn vect_mul<P: ParameterSet>(a: &Vect<P>, b: &Vect<P>) -> Vect<P> {
     }
 
     // Schoolbook multiplication with clmul64 word-level multiply.
-    // Zero-word skipping exploits that HQC typically multiplies a dense
-    // vector (h from XOF) by a sparse one (weight 66-149 out of 17669-57637 bits),
-    // so most u64 words of the sparse operand are zero.
+    // No zero-word skipping: constant-time execution to prevent timing
+    // side-channels on secret vector contents.
+    //
+    // The clmul lookup table depends only on a_words[i], so we hoist it
+    // outside the inner loop to avoid rebuilding it n_words times per
+    // outer iteration.
     let mut mul_res = VectNWords2::<P>::default();
 
     for i in 0..n_words {
-        if a_words[i] == 0 {
-            continue;
-        }
+        let table = ClmulTable::new(a_words[i]);
         for j in 0..n_words {
-            if b_words[j] == 0 {
-                continue;
-            }
-            let (lo, hi) = clmul64(a_words[i], b_words[j]);
+            let (lo, hi) = table.clmul(b_words[j]);
             mul_res[i + j] ^= lo;
             mul_res[i + j + 1] ^= hi;
         }
