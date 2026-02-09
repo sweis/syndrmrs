@@ -15,27 +15,33 @@ pub const fn add(a: u16, b: u16) -> u16 {
 ///
 /// Takes u16 arguments (matching the reference implementation) but assumes values are < 256.
 /// Returns u16 for consistency with syndrome/polynomial computations.
+///
+/// Constant-time: no branching on input values. Uses a zero mask to handle the
+/// `a == 0 || b == 0` case without an early return.
 #[must_use]
 pub fn mul(a: u16, b: u16) -> u16 {
     debug_assert!(a < 256 && b < 256, "GF(256) elements must be < 256");
-    if a == 0 || b == 0 {
-        return 0;
-    }
+    // Constant-time zero mask: 0xFFFF if both a and b are nonzero, else 0
+    let nonzero = ((a | a.wrapping_neg()) >> 15) & ((b | b.wrapping_neg()) >> 15);
+    let mask = 0u16.wrapping_sub(nonzero);
+
     let log_a = GF_LOG[a as usize] as usize;
     let log_b = GF_LOG[b as usize] as usize;
     let idx = (log_a + log_b) % 255;
-    GF_EXP[idx]
+    GF_EXP[idx] & mask
 }
 
 /// Computes the multiplicative inverse of an element in GF(256).
+///
+/// Constant-time: no branching on input value. Uses a zero mask to handle inv(0) = 0.
 #[must_use]
 pub fn inv(a: u16) -> u16 {
-    if a == 0 {
-        return 0;
-    }
+    let nonzero = (a | a.wrapping_neg()) >> 15;
+    let mask = 0u16.wrapping_sub(nonzero);
+
     let log_a = GF_LOG[a as usize] as usize;
     let idx = (255 - log_a) % 255;
-    GF_EXP[idx]
+    GF_EXP[idx] & mask
 }
 
 /// Squares an element in GF(256).
